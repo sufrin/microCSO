@@ -45,7 +45,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
         else
            s"?[from ${wr.getName}]"
       }
-    s"$result (${buffer.length}/${capacity})"
+    s"$result (${buffer.length}/${capacity}) ic=$inputClosed/oc=$outputClosed"
   }
 
   override def toString: String =

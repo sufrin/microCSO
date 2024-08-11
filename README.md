@@ -42,6 +42,10 @@ are as follows:
   5. The notation for alternation constructs has been dramatically
   simplified, so that runtime "compilation" is no longer necessary.
   In particular, the `after`, and `orelse` notations have been replaced.
+
+  6. Control constructs `withPorts` (and `WithPorts`) that respects the network
+  termination convention have been provided for conciseness, and to
+  avoid clerical errors.
   
 
 **See also** `Github.com/sufrin/ThreadCSO`

@@ -28,77 +28,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 
-trait Closeable {
-  /** Close this, and give up any of its resources */
-  def close(): Unit
-}
-
-
-trait OutPort[T] extends Closeable { port =>
-  /**
-   * Idempotent promise that there will be no further writes to this channel.
-   * Buffered channels may nevertheless be capable of further reads.
-   */
-  def closeOut(): Unit
-  def close(): Unit = closeOut()
-
-  def writeBefore(timeoutNS: Time.Nanoseconds)(value: T): Boolean
-  def !(t: T): Unit
-
-  /**
-   * Behaves as `!(t())` and yields `FAILED` if something can be accepted by the channel; else
-   * yields `NO` or `CLOSED`.
-   */
-  def offer(t: () => T): EventOutcome[Nothing]
-
-  def out: OutPort[T] = port
-
-  /** This port hasn't yet been closed */
-  def canOutput: Boolean
-
-
-  /**
-   * OutPort event notation
-   */
-  def && (guard: => Boolean): GuardedPort[T] = GuardedPort[T](()=>guard, `Out-Port`(out))
-  def =!=> (value: =>T): `Output-Event`[T]  = `Output-Event`(()=>true, out, ()=>value)
-}
-
-
-trait InPort[T] extends Closeable { port: InPort[T] =>
-  /** Idempotent promise that there will be no further reads from the associated channel */
-  def closeIn(): Unit
-  def close(): Unit = closeIn()
-  def readBefore(timeOut: Time.Nanoseconds): Option[T]
-  /** read from the associated channel */
-  def ?(t: Unit): T
-  /** read from the associated channel and apply `f` to the result */
-  def ?[V](f: T=>V): V = f(this.?(()))
-  /**
-   *   Extended-rendezvous read: return to the writer only when `f` terminates.
-   *   This is distinct from `?[V](f: T=>V): V` only in synchronized channels.
-   */
-  def ??[V](f: T=>V): V = f(this.?(()))
-  /** this port itself */
-  def in: InPort[T] = port
-
-  /**
-   * Yields `RETURN(?())` when a writer to the port's channel has already committed to output
-   * else yields `CLOSED` or `NO`
-   */
-  def poll(): EventOutcome[T]
-
-  /** This port hasn't yet been closed */
-  def canInput: Boolean
-
-  def isSharedInPort: Boolean = false
-
-  /**
-   *  InPort event notation
-   */
-  def && (guard: => Boolean): GuardedPort[T] = GuardedPort[T](()=>guard, `In-Port`(in))
-  def =?=> (f: T=>Unit): `Input-Event`[T]  = `Input-Event`(()=>true, in, f)
-}
 
 /**
  *  Abstract syntax of a guarded port or channel: precursor of an alternation event
@@ -564,7 +493,13 @@ object proc extends serialNamer {
    *  Evaluate `body` then yield its result after closing all
    *  the listed ports
    */
-  def withPorts[T](ports: Closeable*)(body: =>T): T = {
+  @inline def withPorts[T,I,O](inPorts: InPort[I]*)(outPorts: OutPort[O]*)(body: =>T): T = WithPorts(inPorts)(outPorts)(body)
+
+  /**
+   *  Evaluate `body` then yield its result after closing all
+   *  the listed ports.
+   */
+  def WithPorts[T, I, O](inPorts: Seq[InPort[I]])(outPorts: Seq[OutPort[O]])(body: =>T): T = {
     var result = null.asInstanceOf[T]
     try {
       result = body
@@ -572,100 +507,15 @@ object proc extends serialNamer {
       case exn: Throwable => throw exn
     }
     finally {
-      for { port <-ports } port.close()
+      if (Component.logging) {
+         for { port<-inPorts } Component.finer(s"WithPorts $port.close()")
+         for { port <-outPorts } Component.finer(s"WithPorts $port.close()")
+      }
+      for { port <-inPorts } port.close()
+      for { port <-outPorts } port.close()
     }
     result
   }
 }
 
-object Component extends Loggable{
-  import proc._
-
-  /** Copy from the given input stream to the given output streams, performing
-   * the outputs concurrently. Terminate when the input stream or any of the
-   * output streams is closed.
-   * {{{
-   * in            /|----> x, ...
-   * x, ... >---->{ | : outs
-   *               \|----> x, ...
-   * }}}
-   */
-  @inline
-  def tee[T](in: InPort[T], outs: OutPort[T]*): process = Tee(in, outs)
-  def Tee[T](in: InPort[T], outs: Seq[OutPort[T]]): process = proc("tee") {
-    var v       = null.asInstanceOf[T]
-    val outputs = ||(for (out <- outs) yield proc { out ! v })
-    repeatedly { v = in ? (); outputs() }
-    in.closeIn()
-    for (out <- outs) out.closeOut()
-  }
-
-  def zip[A,B](as: InPort[A], bs: InPort[B])(out: OutPort[(A,B)]): proc = proc(s"zip($as,$bs)($out)") {
-    var a = null.asInstanceOf[A]
-    var b = null.asInstanceOf[B]
-    val read = proc(s"$as?()") {
-      a = as ? ()
-    } || (proc(s"$bs?()") {
-      b = bs ? ()
-    })
-    withPorts(as, bs, out) {
-      repeatedly {
-        read()
-        out ! (a, b)
-      }
-    }
-  }
-
-  def zip[A,B,C](as: InPort[A], bs: InPort[B], cs: InPort[C])(out: OutPort[(A,B,C)]): proc = proc(s"zip($as,$bs,$cs)($out)") {
-    var a = null.asInstanceOf[A]
-    var b = null.asInstanceOf[B]
-    var c = null.asInstanceOf[C]
-    val read =
-        ||(proc(s"$as?()") { a = as ? () },
-           proc(s"$bs?()") { b = bs ? () },
-           proc(s"$cs?()") { c = cs ? () })
-    withPorts(as, bs, cs, out) {
-      repeatedly {
-        read()
-        out ! (a, b, c)
-      }
-    }
-  }
-
-  def copy[T](in: InPort[T], out: OutPort[T]): process = proc(s"copy($in, $out)") {
-    withPorts(in, out) {
-      repeatedly {
-        out ! (in ? ())
-      }
-    }
-  }
-
-  def merge[T](ins: Seq[InPort[T]])(out: OutPort[T]): process  = proc (s"merge($ins)($out)") {
-      Serve(
-        for { in<-ins } yield in =?=> { t => out!t }
-      )
-    if (logging) finer(s"merge($ins)($out) SERVE terminated")
-    out.closeOut()
-    for { in<-ins } in.closeIn()
-    if (logging) finer(s"merge($ins)($out) terminated after closing")
-  }
-
-  def source[T](out: OutPort[T], it: Iterable[T]): proc = proc (s"source($out,...)"){
-      var count = 0
-      //CSORuntime.newLocal("source count", count)
-      //CSORuntime.newLocal("source out", out)
-      repeatFor (it) { t => out!t; count += 1 }
-      out.closeOut()
-      if (logging) finer(s"source($out) closed")
-  }
-
-  def sink[T](in: InPort[T])(andThen: T=>Unit): proc = proc (s"sink($in)"){
-      var count = 0
-      //CSORuntime.newLocal("sink count", count)
-      //CSORuntime.newLocal("sink in", in)
-      repeatedly { in?{ t => andThen(t); count+=1 } }
-      in.closeIn()
-      if (logging) finer(s"sink($in) closed")
-  }
-}
 
