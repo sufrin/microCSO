@@ -106,7 +106,7 @@ object Alternation  {
    *
    * @see serveBefore
    */
-  def serve(events: IOEvent*): Unit = Serve(events)
+  @inline def serve(events: IOEvent*): Unit = Serve(events)
 
   /**
    * Poll periodically until one of the `events` fires or none is feasible.
@@ -114,7 +114,7 @@ object Alternation  {
    *
    * @see altBefore
    */
-  def alt(events: IOEvent*): Unit = Alt(events)
+  @inline def alt(events: IOEvent*): Unit = Alt(events)
 
   /**
    * Poll periodically until one of the `events` fires or none is feasible. In
@@ -179,7 +179,7 @@ object Alternation  {
    * were involved must now have their semaphores removed by a closing phase of the alternation.
    *
    */
-  def pollEvents(events: Seq[IOEvent], deadline: Nanoseconds=0, afterDeadline: ()=>Unit, waitDelta: Nanoseconds = nanoDelta): Boolean = {
+  private def pollEvents(events: Seq[IOEvent], deadline: Nanoseconds=0, afterDeadline: ()=>Unit, waitDelta: Nanoseconds = nanoDelta): Boolean = {
     var result  = false
     var waiting = true
     var remainingTime = deadline
@@ -256,12 +256,19 @@ object Alternation  {
     (feasibles.length, outcome)
   }
 
-  class Rotater[T](val original: Seq[T]) extends Seq[T] {
+  /** Provides "rotated" views of an original sequence by implementing
+   * an `Iterable[T]` that yields an iterator on the appropriately-rotated
+   * `original`.
+   */
+  private class Rotater[T](val original: Seq[T]) extends Seq[T] with Iterable[T] {
     val length: Int = original.length
     private val LENGTH = length
     private var offset: Int = 0
+
+    /** Rotate the view by one place */
     def rot(): Unit = { offset = (offset+1) % LENGTH}
 
+    /** Provide an iterator over the current view */
     def iterator: Iterator[T] = new Iterator[T] {
       var current: Int = offset
       var count : Int  = LENGTH
@@ -275,6 +282,7 @@ object Alternation  {
       }
     }
 
+    /** Yield the `i`th element of the current view */
     def apply(i: Int): T = original((offset+i)%LENGTH)
   }
 }

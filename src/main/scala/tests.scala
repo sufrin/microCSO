@@ -1,7 +1,7 @@
 package org.sufrin.microCSO
 
 import org.sufrin.logging.{Default, FINEST, INFO, OFF}
-import org.sufrin.microCSO.portTools._
+import org.sufrin.microCSO.Component._
 import org.sufrin.microCSO.proc._
 import org.sufrin.microCSO.termination._
 import org.sufrin.microCSO.Time.{seconds, sleepms}
@@ -480,7 +480,7 @@ object testPolling extends testFramework {
 }
 
 /**
- *  Tests `Serve` functionality using the portTools.merge` component.
+ *  Tests `Serve` functionality using the Component.merge` component.
  *  Among other things this test demonstrated the importance of getting
  *  readers and writers counts correct on (nominally) shared channels.
  */
@@ -489,7 +489,7 @@ object testMerge extends testFramework {
   def labelled(n: Int): Iterable[(Int, Int)] = for {i <- 0 until 10} yield (n, i)
 
   def test(): Unit = {
-    portTools.level = OFF
+    Component.level = OFF
     for {bufSize <- List(0, 1, 5)} {
 
       val chans: Seq[Chan[(Int, Int)]] = (0 until N).toList.map { case n: Int => Chan[(Int, Int)](s"chan$n", 0) }
@@ -521,7 +521,7 @@ object testMerge extends testFramework {
       println(s"Merge trial $N producers (output termination) (merge channel size = $bufSize)")
       println(s"This also demonstrates selective logging of channel events")
       for { chan <- chans } chan.level = FINEST
-      portTools.level=FINEST
+      Component.level=FINEST
       merged.level=FINEST
       run(producers             ||
           merge(chans)(merged)  ||

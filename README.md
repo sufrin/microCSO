@@ -11,14 +11,38 @@ of the Communicating Scala Objects DSL (CSO) that I designed and
 built at Oxford University in 2007. The main differences with **ThreadCSO**
 are as follows:
 
-  1. processes lways run in lightweight threads
+   1. When they are started, processes run in lightweight threads by default, and
+   this makes it possible to deploy tens or hundreds of thousands
+   of them in an applicaiton. They are still (in `Java`/`Scala`
+   terminology) still `runnable`s so can also be run by any of the
+   `java.util.Executor` implementations. 
 
-  2. the `PROC` type is now named `process`
+   1. The `PROC` type is now named `process`. The following
+   operational equivalences hold between a process, `p`, and
+   a procedure (method), `m`, defined by:
 
-  3. alternation constructs are implemented by fast and efficient polling
+````
+    val p: process   = proc { body }
+    def m: ()=> Unit = { body }
+````
+   
+   * `p.run()` is equivalent to `m()`
 
-  4. There are fewer varieties of channel, and their construction is
-  done systenmatically in a single channel factory.
+   * `p()`     is equivalent to `m()`
+  
+
+  3. There are fewer varieties of channel, and their construction is
+  done systematically in a single channel factory.
+
+  4. Alternation constructs like `alt` and `serve` are implemented
+  by fast and efficient polling -- invoked only when necessary. The
+  inter-poll period default can be overridden for each alternation
+  instance.
+
+  5. The notation for alternation constructs has been dramatically
+  simplified, so that runtime "compilation" is no longer necessary.
+  In particular, the `after`, and `orelse` notations have been replaced.
+  
 
 **See also** `Github.com/sufrin/ThreadCSO`
 

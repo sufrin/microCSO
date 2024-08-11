@@ -21,10 +21,9 @@
 
 package org.sufrin.microCSO
 
+import Alternation._
+import termination._
 import org.sufrin.logging._
-import org.sufrin.microCSO.Alternation._
-import org.sufrin.microCSO.termination._
-
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -579,12 +578,27 @@ object proc extends serialNamer {
   }
 }
 
-
-
-
-object portTools extends Loggable{
+object Component extends Loggable{
   import proc._
 
+  /** Copy from the given input stream to the given output streams, performing
+   * the outputs concurrently. Terminate when the input stream or any of the
+   * output streams is closed.
+   * {{{
+   * in            /|----> x, ...
+   * x, ... >---->{ | : outs
+   *               \|----> x, ...
+   * }}}
+   */
+  @inline
+  def tee[T](in: InPort[T], outs: OutPort[T]*): process = Tee(in, outs)
+  def Tee[T](in: InPort[T], outs: Seq[OutPort[T]]): process = proc("tee") {
+    var v       = null.asInstanceOf[T]
+    val outputs = ||(for (out <- outs) yield proc { out ! v })
+    repeatedly { v = in ? (); outputs() }
+    in.closeIn()
+    for (out <- outs) out.closeOut()
+  }
 
   def zip[A,B](as: InPort[A], bs: InPort[B])(out: OutPort[(A,B)]): proc = proc(s"zip($as,$bs)($out)") {
     var a = null.asInstanceOf[A]
