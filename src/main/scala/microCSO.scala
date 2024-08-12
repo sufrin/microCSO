@@ -493,26 +493,23 @@ object proc extends serialNamer {
    *  Evaluate `body` then yield its result after closing all
    *  the listed ports
    */
-  @inline def withPorts[T,I,O](inPorts: InPort[I]*)(outPorts: OutPort[O]*)(body: =>T): T = WithPorts(inPorts)(outPorts)(body)
+  @inline def withPorts[T](ports: Closeable*)(body: =>T): T = WithPorts(ports)(body)
 
   /**
    *  Evaluate `body` then yield its result after closing all
-   *  the listed ports.
+   *  the listed ports
    */
-  def WithPorts[T, I, O](inPorts: Seq[InPort[I]])(outPorts: Seq[OutPort[O]])(body: =>T): T = {
+  def WithPorts[T](ports: Seq[Closeable], otherPorts: Closeable*)(body: =>T): T = {
     var result = null.asInstanceOf[T]
     try {
       result = body
-    } catch {
-      case exn: Throwable => throw exn
     }
     finally {
       if (Component.logging) {
-         for { port<-inPorts } Component.finer(s"WithPorts $port.close()")
-         for { port <-outPorts } Component.finer(s"WithPorts $port.close()")
+        for { port<-ports } Component.finer(s"WithPorts $port.close()")
       }
-      for { port <-inPorts } port.close()
-      for { port <-outPorts } port.close()
+      for { port <-ports } port.close()
+      for { port <-otherPorts } port.close()
     }
     result
   }

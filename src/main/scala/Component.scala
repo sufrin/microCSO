@@ -27,7 +27,7 @@ object Component extends Loggable{
   def Tee[T](in: InPort[T], outs: Seq[OutPort[T]]): process = proc("tee") {
     var v       = in.nothing
     val outputs = ||(for (out <- outs) yield proc { out ! v })
-    WithPorts(List(in))(outs) { repeatedly { v = in ? (); outputs() } }
+    WithPorts(outs,in) { repeatedly { v = in ? (); outputs() } }
   }
 
   /**
@@ -39,11 +39,12 @@ object Component extends Loggable{
     var a = as.nothing
     var b = bs.nothing
     val read = proc(s"$as?()") { a = as ? () } || (proc(s"$bs?()") { b = bs ? () })
-      repeatedly {
-        read()
-        out ! (a, b)
+      withPorts(as,bs,out){
+        repeatedly {
+          read()
+          out ! (a, b)
+        }
       }
-    as.closeIn(); bs.closeIn(); out.closeOut()
     if (logging) finer(s"zip($as, $bs)($out) terminated")
   }
 
@@ -59,12 +60,13 @@ object Component extends Loggable{
     val read = ||(proc(s"$as?()") { a = as ? () },
                   proc(s"$bs?()")  { b = bs ? () },
                   proc(s"$cs?()")  { c = cs ? () })
-      repeatedly {
-        read()
-        out ! (a, b, c)
+      withPorts(as,bs,cs,out){
+        repeatedly {
+          read()
+          out ! (a, b, c)
+        }
       }
-      as.closeIn(); bs.closeIn(); cs.closeIn(); out.closeOut()
-      if (level==4) finer(s"zip repeatedly($as, $bs, $cs)($out) terminated")
+      finer(s"zip repeatedly($as, $bs, $cs)($out) terminated")
   }
 
   /**
@@ -84,12 +86,13 @@ object Component extends Loggable{
         proc(s"$cs?()") { c = cs ? () },
         proc(s"$ds?()") { d = ds ? () },
       )
-      repeatedly {
-        read()
-        out ! (a, b, c, d)
+      withPorts(as,bs,cs,ds,out) {
+        repeatedly {
+          read()
+          out ! (a, b, c, d)
+        }
+        if (logging) finer(s"zip($as, $bs, $cs, $ds)($out) terminated")
       }
-      as.closeIn(); bs.closeIn(); cs.closeIn(); ds.closeIn(); out.closeOut()
-      if (logging) finer(s"zip($as, $bs, $cs, $ds)($out) terminated")
   }
 
   /**
@@ -97,7 +100,7 @@ object Component extends Loggable{
    * closed.
    */
   def copy[T](in: InPort[T], out: OutPort[T]): process = proc(s"copy($in, $out)") {
-    withPorts(in)(out) {
+    withPorts(in, out) {
       repeatedly {
         out ! (in ? ())
       }
@@ -111,7 +114,7 @@ object Component extends Loggable{
   @inline def merge[T](ins: InPort[T]*)(out: OutPort[T]): process  = Merge(ins)(out)
 
   def Merge[T](ins: Seq[InPort[T]])(out: OutPort[T]): process  = proc (s"Merge($ins)($out)") {
-      WithPorts(ins)(List(out)) {
+      WithPorts(ins, out) {
         Serve(
           for {in <- ins} yield in =?=> { t => out ! t }
         )
@@ -124,8 +127,11 @@ object Component extends Loggable{
     var count = 0
     //CSORuntime.newLocal("source count", count)
     //CSORuntime.newLocal("source out", out)
-    withPorts ()(out) { repeatFor (it) { t => out!t; count += 1 } }
-    if (logging) finer(s"source($out) terminated")
+    //withPorts (out) {
+      repeatFor (it) { t => out!t; count += 1 }
+      out.closeOut()
+    //}
+    if (logging) finer(s"source($out) terminated after $count")
 
   }
 
@@ -138,7 +144,10 @@ object Component extends Loggable{
     var count = 0
     //CSORuntime.newLocal("sink count", count)
     //CSORuntime.newLocal("sink in", in)
-    withPorts(in)() { repeatedly { in?{ t => andThen(t); count+=1 } } }
-    if (logging) finer(s"sink($in) terminated")
+    //withPorts(in) {
+      repeatedly { in?{ t => andThen(t); count+=1 } }
+      in.closeIn()
+    //}
+    if (logging) finer(s"sink($in) terminated after $count")
   }
 }

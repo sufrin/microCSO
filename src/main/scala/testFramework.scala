@@ -38,22 +38,25 @@ trait testFramework {
     val handle = p.fork()
     handle.terminationStatus(deadline) match {
       case (true, status)  => println(s"\n$p\n TERMINATED ($status)")
-      case (false, status) =>
-        println(s"\n$p\nTIMEOUT after ${deadline.toDouble/seconds(1.0)} seconds ($status)")
-        println("CSORuntime Information:")
-        CSORuntime.forEach {
-          case thread: Thread =>
-            CSORuntime.remove(thread)
-            Threads.showThreadTrace(thread)
-        }
-        println("Open Channels:")
-        CSORuntime.forEachChannel{
-          case chan: Chan[_] =>
-            println(s"$chan")
-        }
+      case (false, status) => printStatus(status)
     }
     println(s"=====================")
     System.out.flush()
+  }
+
+  def printStatus(status: termination.Status): Unit = {
+    println(s"\nTIMEOUT after ${deadline.toDouble/seconds(1.0)} seconds ($status)")
+    println("CSO Runtime Information:")
+    CSORuntime.forEach {
+      case thread: Thread =>
+        CSORuntime.remove(thread)
+        Threads.showThreadTrace(thread)
+    }
+    println("Open Channels:")
+    CSORuntime.forEachChannel{
+      case chan: Chan[_] =>
+        println(s"$chan")
+    }
   }
 
   def show(s: String): Unit = {

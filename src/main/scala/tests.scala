@@ -1,11 +1,10 @@
 package org.sufrin.microCSO
 
+import Component._
+import Time.{seconds, sleepms}
+import proc._
+import termination._
 import org.sufrin.logging.{Default, FINEST, INFO, OFF}
-import org.sufrin.microCSO.Component._
-import org.sufrin.microCSO.proc._
-import org.sufrin.microCSO.termination._
-import org.sufrin.microCSO.Time.{seconds, sleepms}
-import java.util.concurrent.atomic.AtomicLong
 
 
 /**
@@ -57,6 +56,19 @@ object testSimpleParAndTermination extends testFramework {
   }
 }
 
+object testBufferClose extends testFramework {
+  def test(): Unit = {
+    Component.level=FINEST
+
+    for { size<-List(0, 1, 5, 10, 20)} {
+      println(s"source(1..15) -> Chan($size) -> sink")
+      val as = Chan[Int]("as", size).withLogLevel(FINEST)
+      run(
+        source((1 to 15).toList)(as) || sink(as) { s => show(s.toString) }
+      )
+    }
+  }
+}
 /**
  * Tests termination interacting with || and with closed channels
  */
@@ -65,35 +77,15 @@ object testParAndTermination extends testFramework {
     def test() = {
       Default.level = INFO
 
-      run((proc("first") {
-        show("first")
-      } || proc("second") {
-        show("second")
-      }))
+      run((proc("first") { show("first") } || proc("second") { show("second") }))
 
       val names = "first second third fourth".split(' ').toSeq
       val procs = names map { name => proc(name) { show(name)}}
-
       run(||(procs))
 
       run(||(for {i <- 0 until 10} yield proc(s"$i") {
         show(s"$i")
       }))
-
-      {
-        val as = Chan[Int]("as", 10)
-        run(
-          source((0 until 15).toList)(as) || sink(as) { s => show(s.toString) }
-        )
-      }
-
-
-      {
-        val as = Chan[Int]("as", 1)
-        run(
-          source((0 until 15).toList)(as) || sink(as) { s => show(s.toString) }
-        )
-      }
 
       { println("UnShared Buffered")
         val c = Chan[String]("c", 4)
@@ -249,7 +241,7 @@ object testZips extends testFramework {
     (source(az)(a2z)
     ||  source(za)(z2a)
     ||  proc ("ints") {
-        withPorts(ints)() {
+        withPorts(ints) {
           var n: Int = 0
           repeatedly { ints!n; n+=1; if (n==26) ints.closeOut() }
         }
@@ -260,9 +252,10 @@ object testZips extends testFramework {
     println(s"testZips($a,$z,$i,$o) -> $count")  }
 }
 
-object testIdempotence extends testFramework {
+object testClosing extends testFramework {
+  var runs = 0
   def test(): Unit = {
-    println("Results")
+    println("====== Downstream closing (0..100 -> alpha -> mid -> omega | 100")
     testRun(0, 0, 0, 100)()
     testRun(0, 0, 1, 100)()
     testRun(0, 0, 50, 100)()
@@ -270,14 +263,15 @@ object testIdempotence extends testFramework {
     testRun(0, 0, 90, 100)()
     testRun(0, 5, 90, 100)()
     testRun(0, 20, 90, 100)()
-
+    println(s"$runs tests")
+    println("====== Upstream closing (0..100 -> alpha -> mid -> omega -> | limit")
     testRun(0, 0, 0, 50)()
     testRun(0, 20, 90, 20)()
     testRun(0, 20, 90, 25)()
     testRun(1, 20, 90, 50)()
     testRun(1, 20, 90, 20)()
     testRun(1, 20, 90, 25)()
-    // the next two sections suggest that buffers keep on giving after an upstream close
+
     testRun(2, 20, 90, 50)()
     testRun(2, 20, 90, 20)()
     testRun(2, 20, 90, 25)()
@@ -285,29 +279,33 @@ object testIdempotence extends testFramework {
     testRun(2, 0, 90, 50)()
     testRun(2, 0, 90, 20)()
     testRun(2, 0, 90, 25)()
-    // problematic below
-    println("======")
 
-    for ( a<-0 to 5; m<-0 to 6; z<-0 to 3)
-         testRun(a, 2*m, 7*z, 100)()
+    // more arbitrary buffering
+    for ( a<-0 to 5; m<-0 to 7; z<-0 to 3)
+         testRun(a, 2*m, 7*z, 40)()
 
+    println(s"$runs tests")
   }
+
   def testRun(a:Int, m: Int, z: Int, o: Int)(chanLevel: Int=OFF, compLevel: Int=OFF): Unit = {
-    //println(s"testZips($a,$z,$i,$o)")
-    val level = chanLevel
+    val level       = chanLevel
     Component.level = compLevel
     val alpha  = Chan[Int]("alpha", a).withLogLevel(level)
     val omega  = Chan[Int]("omega", z).withLogLevel(level)
-    val mid   = Chan[Int]("mid", m).withLogLevel(level)
-      .withLogLevel(level)
+    val mid    = Chan[Int]("mid", m).withLogLevel(level)
+    runs += 1
 
-    var count = new AtomicLong(0)
-    (  source((1 to 100))(alpha)
-      || copy(alpha, mid)
-      || copy(mid, omega)
-      || sink(omega) { n => if (count.incrementAndGet>o) omega.closeOut() }
-    )()
-    if (count.get!=o) println(s"testIdem($a,$m,$z,$o) -> ${count.get}")  }
+    var count = 0
+    var last  = 0
+    val handle: ForkHandle =
+      (    source((1 to 100))(alpha)
+        || copy(alpha, mid)
+        || copy(mid, omega)
+        || sink(omega) { n => count += 1; last=n; if (n >= o) omega.closeIn() }
+      ).fork()
+    val (terminated, status) = handle.terminationStatus(seconds(3))
+    if (!terminated) printStatus(status)
+    if (count!=o) println(s"testRun(1..100 -> Chan($a) -> Chan($m) -> Chan($z) | $o) => ${count} ($last)")  }
 }
 
 
@@ -700,7 +698,7 @@ object testEvents extends testFramework {
       var m, n = 0
 
       def copy[T](i: InPort[T], o: OutPort[T]): process = proc(s"xfer($i,$o)"){
-        withPorts(i)(o) {
+        withPorts(i, o) {
           var buf: Option[T] = None
           serve(
             (i && buf.isEmpty) =?=> { t => buf = Some(t) }
@@ -764,7 +762,7 @@ object testEvents extends testFramework {
       var m, n = 0
 
       val lrOutput = proc("lrOutput") {
-        withPorts()(l, r) {
+        withPorts(l, r) {
           serve(
             (l && n < 20) =!=> { n += 1; s"$n" }
             ,
@@ -806,7 +804,7 @@ object testEvents extends testFramework {
       }
 
       val closes = proc("closes") {
-        withPorts (c)(l, r) {
+        withPorts (l, r, c) {
           l!"HELLO"
           Time.sleep(seconds(1))
           println("Closing l")

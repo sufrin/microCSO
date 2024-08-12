@@ -68,7 +68,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
   }
 
   def !(value: T) = {
-    checkOutputOpen
+    checkOutputPossible
     val current = Thread.currentThread
     val lastWriter = writer.getAndSet(current)
     assert(
@@ -80,7 +80,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       LockSupport.park(this)
     }
     // the buffer is no longer full, or the inport or outport was closed
-    checkOutputOpen                 // redundant check that outport not closed during the wait
+    checkOutputPossible                 // redundant check that outport not closed during the wait
     buffer.addOne(value)            // enqueue the value
     LockSupport.unpark(reader.get)  // tell a waiting reader
     writer.set(null)                // allow the next writer
@@ -99,7 +99,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
   }
 
   def ?(t: Unit): T = {
-    checkInputOpen
+    checkInputPossible
     val current     = Thread.currentThread
     val lastReader  = reader.getAndSet(current)
     assert(
@@ -112,7 +112,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       LockSupport.park(this)
     }
     // output is closed or something is in the buffer
-    checkInputOpen                    // redundant check that inport not closed during the wait
+    checkInputPossible                    // redundant check that inport not closed during the wait
     val result = buffer.removeHead()  // dequeue
     reader.set(null)                  // allow (the next) reader in
     LockSupport.unpark(writer.get)    // tell a waiting writer
@@ -128,6 +128,7 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       if (logging) finer(s"$this CLOSED INPUT")
       LockSupport.unpark(writer.getAndSet(null))
     }
+    removeFromRuntime()
   }
 
   def closeOut(): Unit = {
@@ -136,17 +137,22 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       if (logging) finer(s"$this CLOSED OUTPUT")
       LockSupport.unpark( reader.getAndSet(null) )
     }
+    removeFromRuntime()
   }
 
-  @inline private[this] def checkInputOpen =
+  def removeFromRuntime(): Unit = {
+    if (outputClosed.get && inputClosed.get) CSORuntime.removeChannel(this)
+  }
+
+  @inline private[this] def checkInputPossible =
     if (inputClosed.get || (outputClosed.get && isEmpty)) {
       writer.set(null)
       reader.set(null)
       throw new termination.Closed(name)
     }
 
-  @inline private[this] def checkOutputOpen =
-    if (outputClosed.get) {
+  @inline private[this] def checkOutputPossible =
+    if (inputClosed.get || outputClosed.get) {
       writer.set(null)
       reader.set(null)
       throw new termination.Closed(name)
@@ -158,11 +164,11 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       reader.get == null,
       s"[${current.getName}]$name?() overtaking [${reader.get.getName}]$name?()"
     )
-    checkInputOpen
+    checkInputPossible
     reader.set(current)
     val success =
       0 < Time.parkUntilElapsedOr(this, timeoutNS, closed.get || !isEmpty)
-    checkInputOpen
+    checkInputPossible
     if (success) Some(this.?(())) else None
   }
 
@@ -171,11 +177,11 @@ class BufferChan[T](val name: String, capacity: Int) extends Chan[T] {
       writer.get == null,
       s"$name!($value) from ${Thread.currentThread.getName} overtaking $name!($buffer) [${writer.get.getName}]"
     )
-    checkOutputOpen
+    checkOutputPossible
     // LockSupport.unpark(reader.getAndSet(null)) // WHY?
     var success =
       0 < Time.parkUntilElapsedOr(this, timeoutNS, closed.get || !isFull)
-    checkOutputOpen
+    checkOutputPossible
     this.!(value)
     success
   }
