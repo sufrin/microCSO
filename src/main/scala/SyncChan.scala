@@ -8,9 +8,9 @@ import java.util.concurrent.locks.LockSupport
 
 /**
  * A non-shared synchronized (unbuffered) channel with the given `name`. When `c` is
- * such a channel, the termination of `c!v` (in a writing process) is synchronized with that
- * of `c?()` in a (distinct) reading process. The event is called a rendezvous: thje first
- * process to arrive at the rendezvous awaits the second. If more than one reader arrives
+ * such a channel, the termination of `c!v` (in a writing proc) is synchronized with that
+ * of `c?()` in a (distinct) reading proc. The event is called a rendezvous: thje first
+ * proc to arrive at the rendezvous awaits the second. If more than one reader arrives
  * before a writer (or vice-versa) the channel detects that it is being shared; but this
  * heuristic for detecting sharing is not complete, because a consumer that repeatedly
  * consumes at a faster rate than two producers will not be detectable this way.

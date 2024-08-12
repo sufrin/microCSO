@@ -40,156 +40,35 @@ case class GuardedPort[T](guard: () => Boolean, port: AnyPort[T]) {
 
 
 
-/** Database of running processes, and channels   */
-object CSORuntime {
-  def reset(): Unit = {
-    vThreads.clear()
-    vChannels.clear()
-  }
-  /** Mapping of (running) thread ids to CSORuntime */
-  val vThreads =
-    new scala.collection.concurrent.TrieMap[Long, Thread]
 
-  val vChannels =
-    new scala.collection.concurrent.TrieMap[Int, AnyRef]
-
-  /** Evaluate f at each of the running threads  */
-  def forEach(f: Thread=>Unit): Unit =
-    vThreads.foreach{ case (_, thread) => f(thread)}
-
-  /** remove from the database (when terminating) */
-  def remove(thread: Thread): Unit = {
-    vThreads.remove(thread.threadId)
-    thread.getState match {
-      case Thread.State.TERMINATED => removeLocals(thread)
-      case _ =>
-    }
-  }
-
-  /** add to the database (when starting) */
-  def add(thread: Thread): Unit = vThreads += (thread.threadId -> thread)
-
-  /** Evaluate f at each of the running threads  */
-  def forEachChannel(f: Chan[Any] => Unit): Unit =
-    vChannels.foreach{ case (_, chan) => f(chan.asInstanceOf[Chan[Any]])}
-
-  /** remove from the database (when terminating) */
-  def removeChannel(chan: Chan[_]): Unit = vChannels.remove(System.identityHashCode(chan))
-
-  /** add to the database (when starting) */
-  def addChannel(chan: Chan[_]): Unit = vChannels += (System.identityHashCode(chan) -> chan)
-
-  //////////////////////// local variables
-
-  type LocalKey = String
-  type LocalThunk = ()=> Any
-
-  val vLocals =
-    new scala.collection.concurrent.TrieMap[Long, scala.collection.concurrent.TrieMap[LocalKey, LocalThunk]]
-
-  def newLocal[V](key: String, value: =>V): Unit = {
-    val id  = Thread.currentThread().threadId
-    val map = vLocals.getOrElseUpdate(id, new scala.collection.concurrent.TrieMap[LocalKey, LocalThunk])
-    map += (key -> { () => value })
-  }
-
-  def forLocals(thread: Thread)(fun: (String, Any)=>Unit): Unit = {
-    val id  = thread.threadId
-    for { map <- vLocals.get(id) }
-        for { (k, thunk) <- map } fun(k, thunk())
-  }
-
-  def removeLocals(thread: Thread): Unit = {
-    val id  = thread.threadId
-    for { map <- vLocals.get(id) } map.clear()
-    vLocals.remove(id)
-  }
-}
-
-object Threads {
-  import java.io.PrintStream
-
-  val suppress: String = "java.base"
-
-
-  def showThreadTrace(thread: Thread, out: PrintStream) = {
-    out.println(thread)
-    CSORuntime.forLocals(thread) {
-      case (key, value) => out.println(f"$key%8s -> $value%s")
-    }
-    showStackTrace(thread.getStackTrace, out)
-  }
-
-  def showStackTrace(trace: Array[StackTraceElement], out: PrintStream=System.out) = {
-    for (frame <- trace
-         if ! frame.isNativeMethod
-        )
-    {
-      if (frame.getClassName.startsWith("java.")) {
-      }
-      else
-        out.println(unmangle(frame.toString))
-    }
-    out.println()
-  }
-
-  def showThreadTrace(thread: Thread): Unit =
-      showThreadTrace(thread: Thread, System.out)
-
-  /** Mapping from mangleable characters to their mangling. */
-  private val mangleMap = List(
-    ("~", "$tilde"),
-    ("=", "$eq"),
-    ("<", "$less"),
-    (">", "$greater"),
-    ("!", "$bang"),
-    ("#", "$hash"),
-    ("%", "$percent"),
-    ("^", "$up"),
-    ("&", "$amp"),
-    ("|", "$bar"),
-    ("*", "$times"),
-    ("/", "$div"),
-    ("+", "$plus"),
-    ("-", "$minus"),
-    (":", "$colon"),
-    ("\\", "$bslash"),
-    ("?", "$qmark"),
-    ("@", "$at")
-  )
-
-  /** unmangle a compiler-generated mangled name */
-  private def unmangle(name: String): String = {
-    var r = name
-    for ((ch, mangled) <- mangleMap) r = r.replace(mangled, ch)
-    r
-  }
-}
 
 /**
- *  A `process` is a prototype for an entity that can be applied
+ *  A `proc` is a prototype for an entity that can be applied
  *  or `forked`.  In the former case it runs in the JVM thread from which it
  *  was applied; in the latter case it runs in a newly-acquired
  *  JVM thread.
  *
- *  It can also be composed in parallel with another `process`.
+ *  It can also be composed in parallel with another `proc`.
+ *
+ *  All `proc`s are made by the factory `proc`.
  */
-trait process extends (()=>Unit) {
+trait proc extends (()=>Unit) {
    override def toString: String = name
 
    /** Run in the current thread  */
    def apply(): Unit
+
   /**
    *  Run in a newly-acquired thread; yielding a handle from which the
    *  thread can be interrupted or awaited.
    */
   def fork():  ForkHandle
 
-  /** Name of the process */
+  /** Name of the proc */
   def name: String
 
-  /** parallel composition of `this: process` with `that: process` */
-  def ||(that: process): process
+  /** parallel composition of `this: proc` with `that: proc` */
+  def ||(that: proc): proc
  }
 
 import java.util.concurrent.{CountDownLatch => Latch}
@@ -252,39 +131,12 @@ class ForkHandle(val name: String, val body: ()=>Unit, val latch: Latch) extends
   }
 }
 
-/**
- *  Constructor for a simple `process`
- */
-class proc(val name: String="", val body: ()=>Unit)  extends process { thisProc =>
-  import termination._
-  private val logging: Boolean = false
-
-  def apply(): Unit = body()
-
-  def fork(): ForkHandle = {
-    val handle = new ForkHandle(name, apply, new Latch(1))
-    handle.start()
-    handle
-  }
-
-  /**
-   *  A `proc` that runs `this`  and `that` in parallel until they have both
-   *  terminated, then propagates an appropriately informative termination status.
-   *
-   *  @see Status.|||
-   */
-   def ||(that: process): process = new par(List(this, that))
 
 
-  /** Syntactic sugar: coerce a closure to a proc  */
-  def ||(body: => Unit): process = new par(List(this, proc { body }))
-
-}
-
-class par(components: Seq[process]) extends process {
+class par(components: Seq[proc]) extends proc {
   private val logging: Boolean  = false
   def name: String = components.map(_.name).mkString("(", "||", ")")
-  def ||(that: process): process = new par(List(this, that))
+  def ||(that: proc): proc = new par(List(this, that))
 
   def apply(): Unit = {
     val latch       = new Latch(components.length-1)
@@ -321,7 +173,7 @@ class par(components: Seq[process]) extends process {
 
 /**
  * Implementation of the algebra of terminal `Status`es that is used to support
- * coherent termination of `||` constructs. `||(P1, ... Pn)` constructs a process
+ * coherent termination of `||` constructs. `||(P1, ... Pn)` constructs a proc
  * that (when started) terminates when all its components have terminated. Its terminal
  * status is the least upper bound of the terminal statuses of its components (in
  * the ordering `unAnticipated >= Anticipated >= Terminated`). This
@@ -360,7 +212,7 @@ object termination {
       if (logging) {
         if (Default.level>=FINEST) {
           Default.finest(s"[${Thread.currentThread().getName}]$this.propagate()")
-          Threads.showStackTrace(throwable.getStackTrace)
+          ThreadTracing.showStackTrace(throwable.getStackTrace)
           System.out.flush()
         }
       }
@@ -406,8 +258,7 @@ trait serialNamer {
   def nextName(): String = s"$namePrefix#${serial.getAndAdd(1)}"
 }
 
-object proc extends serialNamer {
-  private val logging: Boolean = false
+object proc extends serialNamer with Control {
 
   import termination._
   val namePrefix = "proc"
@@ -425,93 +276,37 @@ object proc extends serialNamer {
     }
   }
 
-  def apply(name: String)(body: => Unit): proc = new proc(name, ()=>body)
+  def apply(name: String)(body: => Unit): proc = new PROCESS(name, ()=>body)
 
-  def apply(body: => Unit): proc = new proc(nextName(), ()=>body)
-
-  def stop: Unit = throw termination.Stopped
-  def fail(why: String): Unit = throw new Error(s"fail($why) from ${Thread.currentThread.getName}")
-
-  def ||(procs: Seq[process]): process = new par(procs)
-  def ||(proc: process, procs: process*): process = new par(proc::procs.toList)
-
-
-  /** Iterate `body` while the evaluation of `guard` yields `true`. If an
-   * exception ''ex'' is thrown, then stop the iteration; and then unless ''ex'' is
-   * a `Anticipated` re-throw ''ex''.
-   */
-  def repeat(guard: => Boolean)(body: => Unit): Unit = {
-    var go = guard
-    while (go)
-      try {
-        body; go = guard
-      }
-      catch {
-        case a: Anticipated => if (logging) Default.finest(s"repeat => $a"); go = false
-        case t: Throwable   => throw t
-      }
-  }
-
-  def repeatedly(body: => Unit): Unit = {
-    var go = true
-    while (go)
-      try {
-        body
-      }
-      catch {
-        case a: Anticipated => if (logging) Default.finest(s"repeatedly => $a"); go = false
-        case t: Throwable => throw t
-      }
-  }
-
-  /** Evaluate `body` and return its value unless an exception ''ex'' is thrown.
-   * If ''ex'' is a `Anticipated` then evaluate and return the value of
-   * `alternative`, otherwise re-throw ''ex''.
-   */
-  def attempt[T](body: => T)(alternative: => T): T = {
-    try {
-      body
-    }
-    catch {
-      case _: Anticipated => alternative
-      case t: Throwable   => throw t
-    }
-  }
-
-
-  /** `repeatFor (it: Iterable[T]) { bv => body }` applies the function `{ bv =>
-   * body }` to each of the elements of an iterator formed from the iterable.
-   * If an exception ''ex'' is thrown, then stop the iteration; then unless
-   * ''ex'' is a `Anticipated` re-throw ''ex''.
-   */
-  def repeatFor[T](iterable: Iterable[T])(body: T => Unit): Unit =
-    attempt {
-      for (t <- iterable) body(t)
-    } {}
+  def apply(body: => Unit): proc = new PROCESS(nextName(), ()=>body)
 
   /**
-   *  Evaluate `body` then yield its result after closing all
-   *  the listed ports
+   *  Constructor for a simple `proc`
    */
-  @inline def withPorts[T](ports: Closeable*)(body: =>T): T = WithPorts(ports)(body)
+  private class PROCESS(val name: String="", val body: ()=>Unit)  extends proc { thisProc =>
+    import termination._
+    private val logging: Boolean = false
 
-  /**
-   *  Evaluate `body` then yield its result after closing all
-   *  the listed ports
-   */
-  def WithPorts[T](ports: Seq[Closeable], otherPorts: Closeable*)(body: =>T): T = {
-    var result = null.asInstanceOf[T]
-    try {
-      result = body
+    def apply(): Unit = body()
+
+    def fork(): ForkHandle = {
+      val handle = new ForkHandle(name, apply, new Latch(1))
+      handle.start()
+      handle
     }
-    finally {
-      if (Component.logging) {
-        for { port<-ports } Component.finer(s"WithPorts $port.close()")
-      }
-      for { port <-ports } port.close()
-      for { port <-otherPorts } port.close()
-    }
-    result
+
+    /**
+     *  A `proc` that runs `this`  and `that` in parallel until they have both
+     *  terminated, then propagates an appropriately informative termination status.
+     *
+     *  @see Status.|||
+     */
+    def ||(that: proc): proc = new par(List(this, that))
+
+
+    /** Syntactic sugar: coerce a closure to a proc  */
+    def ||(body: => Unit): proc = new par(List(this, proc { body }))
+
   }
 }
 

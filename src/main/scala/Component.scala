@@ -23,8 +23,8 @@ object Component extends Loggable{
    * }}}
    */
   @inline
-  def tee[T](in: InPort[T], outs: OutPort[T]*): process = Tee(in, outs)
-  def Tee[T](in: InPort[T], outs: Seq[OutPort[T]]): process = proc("tee") {
+  def tee[T](in: InPort[T], outs: OutPort[T]*): proc = Tee(in, outs)
+  def Tee[T](in: InPort[T], outs: Seq[OutPort[T]]): proc = proc("tee") {
     var v       = in.nothing
     val outputs = ||(for (out <- outs) yield proc { out ! v })
     WithPorts(outs,in) { repeatedly { v = in ? (); outputs() } }
@@ -99,7 +99,7 @@ object Component extends Loggable{
    * Connect an inport to an outport. Terminates on noticing that either has
    * closed.
    */
-  def copy[T](in: InPort[T], out: OutPort[T]): process = proc(s"copy($in, $out)") {
+  def copy[T](in: InPort[T], out: OutPort[T]): proc = proc(s"copy($in, $out)") {
     withPorts(in, out) {
       repeatedly {
         out ! (in ? ())
@@ -111,9 +111,9 @@ object Component extends Loggable{
    * from `ins` onto `out`. Terminates when all of `ins` or `out`
    * has terminated
    */
-  @inline def merge[T](ins: InPort[T]*)(out: OutPort[T]): process  = Merge(ins)(out)
+  @inline def merge[T](ins: InPort[T]*)(out: OutPort[T]): proc  = Merge(ins)(out)
 
-  def Merge[T](ins: Seq[InPort[T]])(out: OutPort[T]): process  = proc (s"Merge($ins)($out)") {
+  def Merge[T](ins: Seq[InPort[T]])(out: OutPort[T]): proc  = proc (s"Merge($ins)($out)") {
       WithPorts(ins, out) {
         Serve(
           for {in <- ins} yield in =?=> { t => out ! t }

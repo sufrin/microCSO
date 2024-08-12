@@ -17,7 +17,7 @@ are as follows:
    terminology) still `runnable`s so can also be run by any of the
    `java.util.Executor` implementations. 
 
-   1. The `PROC` type is now named `process`. The following
+   1. The `PROC` type is now named `proc`. The following
    operational equivalences hold between a process, `p`, and
    a procedure (method), `m`, defined by:
 
@@ -43,9 +43,8 @@ are as follows:
   simplified, so that runtime "compilation" is no longer necessary.
   In particular, the `after`, and `orelse` notations have been replaced.
 
-  6. Control constructs `withPorts` (and `WithPorts`) that respects the network
-  termination convention have been provided for conciseness, and to
-  avoid clerical errors.
+  6. Control constructs `withPorts` and `WithPorts` that respect the network
+  termination convention have been provided for clarity and conciseness.
   
 
 **See also** `Github.com/sufrin/ThreadCSO`

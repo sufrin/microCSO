@@ -11,13 +11,13 @@ import org.sufrin.microCSO.Time._
  * variants `frun`, `fapply`) to start processes.
  *
  * 1. `run` and `frun`
- * fork their argument process, and interrupt it if it runs past
+ * fork their argument proc, and interrupt it if it runs past
  * a deadline; these are helpful for coping with deadlocked
  * threads.
  *
  * 2. `apply` and `fapply` are lower-level testers that
  * catch and backtrace any exceptions/errors thrown by
- * the process they run.
+ * the proc they run.
  */
 trait testFramework {
   val logging: Boolean = true
@@ -30,7 +30,7 @@ trait testFramework {
   /** Run the defined test */
   def main(args: Array[String]): Unit = test()
 
-  def run(p: process): Unit = {
+  def run(p: proc): Unit = {
     CSORuntime.reset()
     Thread.currentThread.setName(s"RUN($p)")
     println(s"============= RUN $p ==============")
@@ -50,7 +50,7 @@ trait testFramework {
     CSORuntime.forEach {
       case thread: Thread =>
         CSORuntime.remove(thread)
-        Threads.showThreadTrace(thread)
+        ThreadTracing.showThreadTrace(thread)
     }
     println("Open Channels:")
     CSORuntime.forEachChannel{
@@ -64,26 +64,26 @@ trait testFramework {
     System.out.flush()
   }
 
-  def frun(p: process): Unit = {
+  def frun(p: proc): Unit = {
     val l = Default.level
     Default.level=FINEST
     run(p)
     Default.level=l
   }
 
-  def fapply(p: process): Unit = {
+  def fapply(p: proc): Unit = {
     val l = Default.level
     Default.level=FINEST
     apply(p)
     Default.level=l
   }
 
-    def apply(p: process): Unit = {
+    def apply(p: proc): Unit = {
     println(s"============= APPLY $p ==============")
     try p() catch {
       case exn: Throwable =>
         System.out.println(exn.getMessage)
-        Threads.showStackTrace(exn.getStackTrace)
+        ThreadTracing.showStackTrace(exn.getStackTrace)
         System.out.flush()
     }
     println(s"===========================")

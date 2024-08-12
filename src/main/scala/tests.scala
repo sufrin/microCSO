@@ -5,6 +5,7 @@ import Time.{seconds, sleepms}
 import proc._
 import termination._
 import org.sufrin.logging.{Default, FINEST, INFO, OFF}
+import java.util.concurrent.atomic.AtomicLong
 
 
 /**
@@ -295,17 +296,16 @@ object testClosing extends testFramework {
     val mid    = Chan[Int]("mid", m).withLogLevel(level)
     runs += 1
 
-    var count = 0
-    var last  = 0
+    var count, last = new AtomicLong(0)
     val handle: ForkHandle =
       (    source((1 to 100))(alpha)
         || copy(alpha, mid)
         || copy(mid, omega)
-        || sink(omega) { n => count += 1; last=n; if (n >= o) omega.closeIn() }
+        || sink(omega) { n => count.incrementAndGet(); last.set(n); if (n >= o) omega.closeIn() }
       ).fork()
     val (terminated, status) = handle.terminationStatus(seconds(3))
     if (!terminated) printStatus(status)
-    if (count!=o) println(s"testRun(1..100 -> Chan($a) -> Chan($m) -> Chan($z) | $o) => ${count} ($last)")  }
+    if (count.get()!=o) println(s"testRun(1..100 -> Chan($a) -> Chan($m) -> Chan($z) | $o) => ${count} ($last)")  }
 }
 
 
@@ -317,7 +317,7 @@ object testSharing extends testFramework {
 
   def test(): Unit = {
     import Time._
-    def useChan(share: Chan[String]): process =
+    def useChan(share: Chan[String]): proc =
       ||(proc("l") {
         var n = 0
         repeat(n < 10) {
@@ -355,15 +355,15 @@ object testSharing extends testFramework {
     val ch2: Chan[String] = Chan.Shared(readers=2, writers=2)[String]("ch2", 0)
     run(proc("w1"){ ch2!"from w1"} ||
         proc("w2"){ ch2!"from w2"} ||
-        proc("ra"){ ch2?{s=>show(s"ra<-$s")} } ||
-        proc("rb"){ ch2?{s=>show(s"rb<-$s")} })
+        proc("ra"){ ch2?{ s=>show(s"ra<-$s")} } ||
+        proc("rb"){ ch2?{ s=>show(s"rb<-$s")} })
 
     println(s"==================== Finite sharing test 2")
     val ch3: Chan[String] = Chan.Shared(readers=2, writers=2)[String]("ch3", 0)
     run(||(proc("w1"){ ch3!"from w1"},
-           proc("rb"){ Time.sleepms(1000); ch3?{s=>show(s"rb<-$s")} },
+           proc("rb"){ Time.sleepms(1000); ch3?{ s=>show(s"rb<-$s")} },
            proc("w2"){ ch3.writeBefore(2000*milliSec)("from w2")},
-           proc("ra"){ ch3?{s=>show(s"ra<-$s")} },
+           proc("ra"){ ch3?{ s=>show(s"ra<-$s")} },
        ))
 
     println("===================== Unshared/unbuffered linear termination test")
@@ -458,7 +458,7 @@ object testDeadlines extends testFramework {
      import Time._
      val Sec=seconds(1)
 
-     def readDeadline(chan: Chan[String], writeDelay: Double, readDead: Double): process = {
+     def readDeadline(chan: Chan[String], writeDelay: Double, readDead: Double): proc = {
        val delay = if (writeDelay>readDead) "(reader times out)" else ""
        ||(
          proc ("caption") { println(f"readDeadline($chan%s, writeDelay=${writeDelay}%f, readDead=$readDead)" + delay) },
@@ -467,7 +467,7 @@ object testDeadlines extends testFramework {
        )
      }
 
-     def writeDeadline(chan: Chan[String], writeDead: Double, readDelay: Double): process = {
+     def writeDeadline(chan: Chan[String], writeDead: Double, readDelay: Double): proc = {
       val delay = if (writeDead<readDelay) "(writer times out)" else ""
       ||(
         proc ("caption") { println(s"writeDeadline($chan, writeDead=$writeDead, readDelay=$readDelay)" + delay) },
@@ -506,7 +506,7 @@ object testDeadlines extends testFramework {
 object testPolling extends testFramework {
   import Time._
   def test(): Unit = {
-    def offerer(chan: Chan[Int], delay: Double, to: Int): process = proc (f"offerer($delay%f, $to%d)") {
+    def offerer(chan: Chan[Int], delay: Double, to: Int): proc = proc (f"offerer($delay%f, $to%d)") {
       val every = seconds(delay)
       for { i<-0 until to } {
         val r = chan.offer(()=>i)
@@ -516,7 +516,7 @@ object testPolling extends testFramework {
       chan.closeOut()
     }
 
-    def writer(chan: Chan[Int], delay: Double, to: Int): process = proc (f"writer($delay%f, $to%d)") {
+    def writer(chan: Chan[Int], delay: Double, to: Int): proc = proc (f"writer($delay%f, $to%d)") {
       val every = seconds(delay)
       for { i<-0 until to } {
         sleep(every)
@@ -526,7 +526,7 @@ object testPolling extends testFramework {
       chan.closeOut()
     }
 
-    def reader(chan: Chan[Int], delay: Double, to: Int): process = proc (f"$chan%s: reader($delay%f, $to%d)") {
+    def reader(chan: Chan[Int], delay: Double, to: Int): proc = proc (f"$chan%s: reader($delay%f, $to%d)") {
       var d = seconds(delay)
       for { i<-0 until to } {
         val r = chan?()
@@ -536,7 +536,7 @@ object testPolling extends testFramework {
       chan.closeIn()
     }
 
-    def poller(chan: Chan[Int], delay: Double, to: Int): process = proc (f"$chan%s: poller($delay%f, $to%d)") {
+    def poller(chan: Chan[Int], delay: Double, to: Int): proc = proc (f"$chan%s: poller($delay%f, $to%d)") {
       var every = seconds(delay)
       for { i<-0 until to } {
         sleep(every)
@@ -697,7 +697,7 @@ object testEvents extends testFramework {
       val r = Chan[String]("r", capacity).withLogLevel(FINEST)
       var m, n = 0
 
-      def copy[T](i: InPort[T], o: OutPort[T]): process = proc(s"xfer($i,$o)"){
+      def copy[T](i: InPort[T], o: OutPort[T]): proc = proc(s"xfer($i,$o)"){
         withPorts(i, o) {
           var buf: Option[T] = None
           serve(
@@ -740,7 +740,7 @@ object testEvents extends testFramework {
       val cev = c =?=> { s: String => show(s"[c:$s]") }
       val rev = r =?=> { s: String => show(s"[r:$s]") }
 
-      val server: process = proc("serve") {
+      val server: proc = proc("serve") {
         serve(lev, rev, cev)
         Default.finer(s"serve() terminated")
       }
