@@ -52,11 +52,14 @@ case class GuardedPort[T](guard: () => Boolean, port: AnyPort[T]) {
  *
  *  All `proc`s are made by the factory `proc`.
  */
-trait proc extends (()=>Unit) {
+trait proc extends (()=>Unit) with Runnable {
    override def toString: String = name
 
    /** Run in the current thread  */
    def apply(): Unit
+
+   /** Run in the current thread */
+   def run(): Unit = apply()
 
   /**
    *  Run in a newly-acquired thread; yielding a handle from which the
