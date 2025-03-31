@@ -9,3 +9,5 @@ lib/
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 README.html
+build.sbt+2025-03-28-160726~
+build.sbt~

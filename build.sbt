@@ -8,11 +8,10 @@ ThisBuild / crossPaths := false
 ThisBuild / organization := "org.sufrin"
 ThisBuild / name := "microCSO"
 ThisBuild / version := "0.9.0"
-ThisBuild / artifactName := {
-  (sv: ScalaVersion, mod: ModuleID, artifact: Artifact) =>
-  "microCSO-" + mod.revision + "." + artifact.extension
-}
-
+//  ThisBuild / artifactName := {
+//    (sv: ScalaVersion, mod: ModuleID, artifact: Artifact) =>
+//    "microCSO-" + mod.revision + "." + artifact.extension
+//  }
 
 
 scalacOptions ++= Seq(
