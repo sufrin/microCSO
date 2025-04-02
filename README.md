@@ -6,10 +6,14 @@
         Emeritus: Department of Computer Science
         Oxford University
 
-**microCSO** is a  new, and somewhat simplified, implementation
-of my Communicating Scala Objects DSL (CSO) used from 2007 to teach
+        (Revised 2nd April, 2025)
+        (Version 0.9.0)
+
+**microCSO** is a  new, and drastically simplified, implementation
+of the channel communication aspects of my Communicating Scala Objects DSL (CSO) used from 2007 to teach
 Oxford's  *Concurrent Programming* course. The main differences with **ThreadCSO**
-are as follows:
+arise from there being no need to implement its pedagogic features comprehensively, 
+and are as follows:
 
    *  Processes run in lightweight threads
    by default when started, and this makes it possible to deploy tens or hundreds
@@ -55,6 +59,10 @@ are as follows:
 ````
         val shared = Chan.Shared(readers = 2, writers = 4)[String]("Shared", 25)
 ````
+  *  Unlike CSO/ThreadCSO both input ports and output ports are *nonvariant*. This
+  leads to a more straightforward implementation of guarded events and
+  alternation constructs.
+
   *  Alternation constructs like `alt` and `serve` are implemented
   by fast and efficient polling -- invoked only when necessary. The
   inter-poll period default can be overridden for each alternation
@@ -66,7 +74,14 @@ are as follows:
 
   *  Control constructs `withPorts` and `WithPorts` that respect the network
   termination convention are provided for clarity and conciseness.
-  
+
+  * In contrast to CSO/ThreadCSO there is very little inbuilt support for run-time inspection of 
+  the state of a concurrent program.
+
+## Road Map  
+
+I will (eventually) revise CSO/ThreadCSO so that process and channel communication features 
+will be consistent with the way they are provided here.
 
 **See also** `Github.com/sufrin/ThreadCSO`
 
